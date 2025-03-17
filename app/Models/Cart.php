@@ -27,4 +27,11 @@ class Cart extends Model
             ->withPivot('quantity', 'price')
             ->withTimestamps();
     }
+    public function updateTotal()
+    {
+        $this->total = $this->items->sum(function ($item) {
+            return $item->quantity * $item->price;
+        });
+        $this->save();
+    }
 }
