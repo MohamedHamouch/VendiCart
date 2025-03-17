@@ -10,10 +10,8 @@ class Product extends Model
         'name',
         'description',
         'price',
-        'stock',
-        'image',
-        'category_id',
-        'is_active'
+        'stock_quantity',
+        'category_id'
     ];
 
     // Product belongs to a category
@@ -31,12 +29,12 @@ class Product extends Model
     }
 
     // Product can be in many carts through cart_items
-    public function carts()
+    
+    public function cartItems()
     {
-        return $this->belongsToMany(Cart::class, 'cart_items')
-            ->withPivot('quantity', 'price')
-            ->withTimestamps();
+        return $this->hasMany(CartItem::class);
     }
+
 
     // Product can have many reviews
     public function reviews()

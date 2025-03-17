@@ -4,54 +4,47 @@ namespace App\Http\Controllers;
 
 use App\Models\Order;
 use App\Models\Cart;
-use App\Models\OrderItem;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 
 class OrderController extends Controller
 {
     public function index()
     {
-        $orders = Auth::user()->orders;
+        $orders = auth()->user()->orders()->latest()->get();
         return view('orders.index', compact('orders'));
     }
-
-    public function checkout(Request $request)
+    
+    public function store(Request $request)
     {
-        $request->validate([
-            'shipping_address' => 'required|string|max:255',
-            'payment_method' => 'required|string',
-        ]);
-
-        $cart = Auth::user()->cart;
-        if (!$cart || $cart->items->isEmpty()) {
-            return redirect()->route('cart.index')->with('error', 'Your cart is empty.');
-        }
-
+        $cart = Cart::where('user_id', auth()->id())->firstOrFail();
+        
         $order = Order::create([
-            'user_id' => Auth::id(),
-            'total_amount' => $cart->items->sum(fn($item) => $item->quantity * $item->price),
-            'status' => 'Pending',
-            'shipping_address' => $request->shipping_address,
-            'payment_method' => $request->payment_method,
-            'payment_status' => 'Pending',
+            'user_id' => auth()->id(),
+            'total' => $cart->total,
+            'status' => 'pending'
         ]);
-
+        
         foreach ($cart->items as $item) {
             $order->items()->create([
                 'product_id' => $item->product_id,
                 'quantity' => $item->quantity,
-                'price' => $item->price,
+                'price' => $item->product->price
             ]);
         }
-
+        
         $cart->items()->delete();
-
-        return redirect()->route('orders.index')->with('success', 'Order placed successfully.');
+        
+        return redirect()->route('orders.show', $order);
     }
-
+    
     public function show(Order $order)
     {
         return view('orders.show', compact('order'));
+    }
+    
+    public function adminIndex()
+    {
+        $orders = Order::latest()->paginate(20);
+        return view('admin.orders.index', compact('orders'));
     }
 }
