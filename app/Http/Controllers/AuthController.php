@@ -10,6 +10,14 @@ use App\Models\User;
 
 class AuthController extends Controller
 {
+    public function registerView(){
+        return view('auth.register');
+    }
+
+    public function loginView(){
+        return view('auth.login');
+    }
+
     public function register(Request $request)
     {
         $validator = Validator::make($request->all(), [
