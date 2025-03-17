@@ -23,7 +23,7 @@ return new class extends Migration
             $table->string('state')->nullable();
             $table->string('postal_code')->nullable();
             $table->string('country')->nullable();
-            $table->enum('role', ['customer', 'admin', 'vendor'])->default('customer');
+            $table->enum('role', ['customer', 'admin'])->default('customer');
             $table->boolean('is_active')->default(true);
             $table->timestamp('last_login')->nullable();
             $table->timestamps(); // created_at and updated_at
