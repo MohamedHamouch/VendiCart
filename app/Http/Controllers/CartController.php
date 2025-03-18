@@ -11,25 +11,41 @@ use Illuminate\Support\Facades\Session;
 
 class CartController extends Controller
 {
-    private function getCartId()
+    private function getCart()
     {
         if (Auth::check()) {
-            $cart = Auth::user()->cart ?? Cart::create(['user_id' => Auth::id()]);
-            return $cart->id;
+            // For authenticated users, use database cart
+            return Auth::user()->cart ?? Cart::create(['user_id' => Auth::id()]);
         }
         
-        if (!Session::has('cart_id')) {
-            $cart = Cart::create();
-            Session::put('cart_id', $cart->id);
+        // For guests, use session cart
+        if (!Session::has('cart')) {
+            Session::put('cart', [
+                'items' => [],
+                'total' => 0
+            ]);
         }
         
-        return Session::get('cart_id');
+        return Session::get('cart');
     }
 
     public function index()
     {
-        $cartId = $this->getCartId();
-        $cart = Cart::with('items.product')->findOrFail($cartId);
+        if (Auth::check()) {
+            $cart = Cart::with('items.product')->where('user_id', Auth::id())->firstOrFail();
+        } else {
+            $cart = $this->getCart();
+            // Load products for session cart items
+            if (!empty($cart['items'])) {
+                $productIds = array_column($cart['items'], 'product_id');
+                $products = Product::whereIn('id', $productIds)->get();
+                
+                foreach ($cart['items'] as &$item) {
+                    $item['product'] = $products->find($item['product_id']);
+                }
+            }
+        }
+        
         return view('cart.index', compact('cart'));
     }
 
@@ -43,102 +59,167 @@ class CartController extends Controller
             return back()->with('error', 'Not enough stock available.');
         }
 
-        $cartId = $this->getCartId();
-        $cart = Cart::findOrFail($cartId);
-
-        $cartItem = $cart->items()->where('product_id', $product->id)->first();
-        
-        if ($cartItem) {
-            // Check if adding more quantity exceeds available stock
-            if (($cartItem->quantity + $request->quantity) > $product->stock_quantity) {
-                return back()->with('error', 'Cannot add more of this item - stock limit reached.');
+        if (Auth::check()) {
+            // Database cart for authenticated users
+            $cart = $this->getCart();
+            $cartItem = $cart->items()->where('product_id', $product->id)->first();
+            
+            if ($cartItem) {
+                if (($cartItem->quantity + $request->quantity) > $product->stock_quantity) {
+                    return back()->with('error', 'Cannot add more of this item - stock limit reached.');
+                }
+                $cartItem->quantity += $request->quantity;
+                $cartItem->save();
+            } else {
+                $cart->items()->create([
+                    'product_id' => $product->id,
+                    'quantity' => $request->quantity,
+                    'price' => $product->price,
+                ]);
             }
-            $cartItem->quantity += $request->quantity;
-            $cartItem->save();
+            $cart->updateTotal();
         } else {
-            $cart->items()->create([
-                'product_id' => $product->id,
-                'quantity' => $request->quantity,
-                'price' => $product->price,
-            ]);
-        }
+            // Session cart for guests
+            $cart = $this->getCart();
+            $found = false;
+            
+            foreach ($cart['items'] as &$item) {
+                if ($item['product_id'] == $product->id) {
+                    if (($item['quantity'] + $request->quantity) > $product->stock_quantity) {
+                        return back()->with('error', 'Cannot add more of this item - stock limit reached.');
+                    }
+                    $item['quantity'] += $request->quantity;
+                    $found = true;
+                    break;
+                }
+            }
 
-        // Update cart total
-        $cart->updateTotal();
+            if (!$found) {
+                $cart['items'][] = [
+                    'product_id' => $product->id,
+                    'quantity' => $request->quantity,
+                    'price' => $product->price
+                ];
+            }
+
+            // Update cart total
+            $cart['total'] = array_reduce($cart['items'], function($total, $item) {
+                return $total + ($item['price'] * $item['quantity']);
+            }, 0);
+
+            Session::put('cart', $cart);
+        }
 
         return redirect()->route('cart.index')->with('success', 'Product added to cart.');
     }
 
-    public function update(Request $request, CartItem $cartItem)
+    public function update(Request $request, $productId)
     {
         $request->validate([
             'quantity' => 'required|integer|min:1',
         ]);
 
-        // Check stock availability
-        if ($request->quantity > $cartItem->product->stock_quantity) {
+        $product = Product::findOrFail($productId);
+
+        if ($request->quantity > $product->stock_quantity) {
             return back()->with('error', 'Requested quantity exceeds available stock.');
         }
 
-        $cartItem->update(['quantity' => $request->quantity]);
-        $cartItem->cart->updateTotal();
+        if (Auth::check()) {
+            $cart = $this->getCart();
+            $cartItem = $cart->items()->where('product_id', $productId)->firstOrFail();
+            $cartItem->update(['quantity' => $request->quantity]);
+            $cart->updateTotal();
+        } else {
+            $cart = $this->getCart();
+            
+            foreach ($cart['items'] as &$item) {
+                if ($item['product_id'] == $productId) {
+                    $item['quantity'] = $request->quantity;
+                    break;
+                }
+            }
+
+            // Update cart total
+            $cart['total'] = array_reduce($cart['items'], function($total, $item) {
+                return $total + ($item['price'] * $item['quantity']);
+            }, 0);
+
+            Session::put('cart', $cart);
+        }
 
         return redirect()->route('cart.index')->with('success', 'Cart updated.');
     }
 
-    public function remove(CartItem $cartItem)
+    public function remove($productId)
     {
-        $cart = $cartItem->cart;
-        $cartItem->delete();
-        $cart->updateTotal();
+        if (Auth::check()) {
+            $cart = $this->getCart();
+            $cart->items()->where('product_id', $productId)->delete();
+            $cart->updateTotal();
+        } else {
+            $cart = $this->getCart();
+            
+            $cart['items'] = array_filter($cart['items'], function($item) use ($productId) {
+                return $item['product_id'] != $productId;
+            });
+
+            // Reindex array
+            $cart['items'] = array_values($cart['items']);
+
+            // Update cart total
+            $cart['total'] = array_reduce($cart['items'], function($total, $item) {
+                return $total + ($item['price'] * $item['quantity']);
+            }, 0);
+
+            Session::put('cart', $cart);
+        }
 
         return redirect()->route('cart.index')->with('success', 'Item removed.');
     }
 
     public function clear()
     {
-        $cartId = $this->getCartId();
-        $cart = Cart::findOrFail($cartId);
-        $cart->items()->delete();
-        $cart->updateTotal();
+        if (Auth::check()) {
+            $cart = $this->getCart();
+            $cart->items()->delete();
+            $cart->updateTotal();
+        } else {
+            Session::put('cart', [
+                'items' => [],
+                'total' => 0
+            ]);
+        }
 
         return redirect()->route('cart.index')->with('success', 'Cart cleared.');
     }
 
-    // When user logs in, merge session cart with user cart
+    // When user logs in, merge session cart into database cart
     public function mergeSessionCart()
     {
-        if (!Session::has('cart_id') || !Auth::check()) {
+        if (!Session::has('cart') || !Auth::check()) {
             return;
         }
 
-        $sessionCartId = Session::get('cart_id');
-        $sessionCart = Cart::with('items')->find($sessionCartId);
-
-        if (!$sessionCart) {
-            return;
-        }
-
+        $sessionCart = Session::get('cart');
         $userCart = Auth::user()->cart ?? Cart::create(['user_id' => Auth::id()]);
 
-        foreach ($sessionCart->items as $item) {
-            $existingItem = $userCart->items()->where('product_id', $item->product_id)->first();
+        foreach ($sessionCart['items'] as $item) {
+            $existingItem = $userCart->items()->where('product_id', $item['product_id'])->first();
             
             if ($existingItem) {
-                $existingItem->quantity += $item->quantity;
+                $existingItem->quantity += $item['quantity'];
                 $existingItem->save();
             } else {
                 $userCart->items()->create([
-                    'product_id' => $item->product_id,
-                    'quantity' => $item->quantity,
-                    'price' => $item->price,
+                    'product_id' => $item['product_id'],
+                    'quantity' => $item['quantity'],
+                    'price' => $item['price'],
                 ]);
             }
         }
 
-        $sessionCart->items()->delete();
-        $sessionCart->delete();
-        Session::forget('cart_id');
+        Session::forget('cart');
         $userCart->updateTotal();
     }
 }

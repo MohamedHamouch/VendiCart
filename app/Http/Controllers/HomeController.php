@@ -14,14 +14,8 @@ class HomeController extends Controller
             ->take(8)
             ->get();
 
-
-        $featuredProducts = Product::with('category')
-            ->where('featured', true)
-            ->take(4)
-            ->get();
-
         $categories = Category::all();
 
-        return view('home', compact('latestProducts', 'featuredProducts', 'categories'));
+        return view('home', compact('latestProducts', 'categories'));
     }
 }
