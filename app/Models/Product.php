@@ -23,9 +23,7 @@ class Product extends Model
     // Product can be in many orders through order_items
     public function orders()
     {
-        return $this->belongsToMany(Order::class, 'order_items')
-            ->withPivot('quantity', 'price')
-            ->withTimestamps();
+        return $this->belongsToMany(Order::class, 'order_items');
     }
 
     // Product can be in many carts through cart_items

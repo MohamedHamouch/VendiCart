@@ -23,9 +23,7 @@ class Cart extends Model
     // Cart has many products through cart_items
     public function products()
     {
-        return $this->belongsToMany(Product::class, 'cart_items')
-            ->withPivot('quantity', 'price')
-            ->withTimestamps();
+        return $this->belongsToMany(Product::class, 'cart_items');
     }
     public function updateTotal()
     {

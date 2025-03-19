@@ -10,25 +10,22 @@ use App\Models\User;
 
 class AuthController extends Controller
 {
-    public function registerView(){
+    public function registerView()
+    {
         return view('auth.register');
     }
 
-    public function loginView(){
+    public function loginView()
+    {
         return view('auth.login');
     }
-
     public function register(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        $request->validate([
             'name' => 'required|string|max:255',
             'email' => 'required|string|email|max:255|unique:users',
             'password' => 'required|string|min:6|confirmed',
         ]);
-
-        if ($validator->fails()) {
-            return response()->json($validator->errors(), 400);
-        }
 
         $user = User::create([
             'name' => $request->name,
@@ -36,24 +33,38 @@ class AuthController extends Controller
             'password' => Hash::make($request->password),
         ]);
 
-        return response()->json(['message' => 'User registered successfully'], 201);
+        Auth::login($user);
+
+        return redirect()->route('home')->with('success', 'Account created successfully!');
     }
 
     public function login(Request $request)
     {
-        $credentials = $request->only('email', 'password');
+        $credentials = $request->validate([
+            'email' => 'required|email',
+            'password' => 'required',
+        ]);
 
         if (Auth::attempt($credentials)) {
-            $user = Auth::user();
-            return response()->json(['message' => 'Login successful', 'user' => $user], 200);
+            $request->session()->regenerate();
+
+            return redirect()->intended('home')->with('success', 'Welcome back!');
         }
 
-        return response()->json(['message' => 'Invalid credentials'], 401);
+        return back()
+            ->withInput($request->only('email'))
+            ->withErrors([
+                'email' => 'The provided credentials do not match our records.',
+            ]);
     }
 
     public function logout(Request $request)
     {
         Auth::logout();
-        return response()->json(['message' => 'Logout successful'], 200);
+
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+
+        return redirect()->route('login')->with('success', 'You have been logged out.');
     }
 }
